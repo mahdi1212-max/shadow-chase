@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Space Explorer AI Edition</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden;
+            background: #000;
+            font-family: 'Arial', sans-serif;
+        }
+        canvas { 
+            display: block; 
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-size: 16px;
+            pointer-events: none;
+            text-shadow: 0 0 10px #00ff00;
+        }
+        #stats {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid #00ff00;
+            box-shadow: 0 0 20px #00ff00;
+        }
+        #score {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: #00ff00;
+            font-size: 24px;
+            padding: 10px;
+            background: rgba(0,0,0,0.7);
+            border-radius: 10px;
+            border: 1px solid #00ff00;
+        }
+        .glow {
+            text-shadow: 0 0 10px #00ff00;
+        }
+        #health-bar {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 20px;
+            background: rgba(0,0,0,0.5);
+            border: 2px solid #00ff00;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        #health-fill {
+            width: 100%;
+            height: 100%;
+            background: #00ff00;
+            transition: width 0.3s ease;
+        }
+        #wave-info {
+            position: absolute;
+            top: 50px;
+            right: 10px;
+            color: #00ff00;
+            font-size: 18px;
+            padding: 10px;
+            background: rgba(0,0,0,0.7);
+            border-radius: 10px;
+            border: 1px solid #00ff00;
+        }
+        #ammo {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            color: #00ff00;
+            font-size: 24px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid #00ff00;
+        }
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #ff0000;
+            text-align: center;
+            color: #ff0000;
+        }
+        #game-over button {
+            background: #ff0000;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        #minimap {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 150px;
+            height: 150px;
+            background: rgba(0,0,0,0.7);
+            border: 1px solid #00ff00;
+            border-radius: 50%;
+            overflow: hidden;
+        }
+
+        #minimap-canvas {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    
+    <div id="info">WASD: حرکت | Space: بالا | Shift: پایین | E: شلیک | R: خشاب‌گذاری | موس: نگاه کردن</div>
+    <div id="score">امتیاز: <span id="scoreValue">0</span></div>
+    <div id="health-bar"><div id="health-fill"></div></div>
+    <div id="wave-info">موج: <span id="waveNumber">1</span></div>
+    <div id="ammo">
+        <span id="clipAmmo">10</span>/<span id="totalAmmo">100</span>
+    </div>
+    <div id="game-over" style="display: none;">
+        <h2>گیم اور</h2>
+        <button onclick="location.reload()">شروع دوباره</button>
+    </div>
+    <div id="minimap">
+        <canvas id="minimap-canvas"></canvas>
+    </div>
+    <div id="stats">
+        <div>سرعت: <span id="speed">0</span> km/s</div>
+        <div>انرژی: <span id="energy">100</span>%</div>
+    </div>
+
+    <script async src="https://unpkg.com/es-module-shims/dist/es-module-shims.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module">
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+    import * as YUKA from 'https://cdn.skypack.dev/yuka';
+
+    // Game Variables
+    let camera, scene, renderer, controls;
+    let entityManager, time;
+    let projectiles = [];
+    let enemies = [];
+    let particles = [];
+    let powerUps = [];
+
+    let score = 0;
+    let energy = 100;
+    let currentWave = 1;
+    let moveForward = false;
+    let moveBackward = false;
+    let moveLeft = false;
+    let moveRight = false;
+    let moveUp = false;
+    let moveDown = false;
+    let velocity = new THREE.Vector3();
+    let direction = new THREE.Vector3();
+    let canShoot = true;
+    const clock = new THREE.Clock(); // این خط رو اضافه کنید
+    let enemyProjectiles = [];
+    const ENEMY_FIRE_RATE = 2000; // میلی‌ثانیه
+    let totalAmmo = 100;      // کل مهمات
+    let clipAmmo = 10;        // مهمات خشاب فعلی
+    const CLIP_SIZE = 10;     // ظرفیت هر خشاب
+    let isReloading = false;  // وضعیت خشاب‌گذاری
+    let minimapCanvas, minimapCtx; // Variables for minimap
+    
+    // Arrays to store game objects
+
+    // Audio
+    let audioContext;
+    let soundEnabled = false;
+
+    // Initialize game
+    init();
+    animate();
+
+    function init() {
+        // Setup Scene
+        scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000000, 0.002);
+
+        // Setup Camera
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.y = 2;
+
+        // Setup Renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(scene.fog.color);
+        document.body.appendChild(renderer.domElement);
+
+        // Setup Lighting
+        setupLighting();
+
+        // Initialize YUKA
+        entityManager = new YUKA.EntityManager();
+        time = new YUKA.Time();
+
+        // Setup Controls
+        setupControls();
+
+        // Create Game Elements
+        createEnvironment();
+        createWeapons();
+        spawnWave();
+
+        // Setup Minimap
+        setupMinimap();
+
+        // Setup Audio
+        setupAudio();
+
+        // Event Listeners
+        window.addEventListener('resize', onWindowResize, false);
+    }
+
+    function setupLighting() {
+        const ambientLight = new THREE.AmbientLight(0x222222);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(1, 1, 1).normalize();
+        scene.add(directionalLight);
+
+        // Add point lights for atmosphere
+        const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xff00ff, 0xffff00];
+        for (let i = 0; i < 5; i++) {
+            const light = new THREE.PointLight(colors[i], 0.5, 50);
+            light.position.set(
+                Math.random() * 100 - 50,
+                Math.random() * 100 - 50,
+                Math.random() * 100 - 50
+            );
+            scene.add(light);
+        }
+    }
+
+    function setupControls() {
+        controls = new PointerLockControls(camera, document.body);
+
+        document.addEventListener('click', () => {
+            if (!soundEnabled) {
+                audioContext.resume().then(() => {
+                    soundEnabled = true;
+                });
+            }
+            controls.lock();
+        });
+
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
+        document.addEventListener('mousedown', onMouseDown);
+    }
+
+    function createEnvironment() {
+        // Create starfield
+        const starsGeometry = new THREE.BufferGeometry();
+        const starPositions = [];
+        for (let i = 0; i < 10000; i++) {
+            starPositions.push(
+                Math.random() * 2000 - 1000,
+                Math.random() * 2000 - 1000,
+                Math.random() * 2000 - 1000
+            );
+        }
+        starsGeometry.setAttribute('position', 
+            new THREE.Float32BufferAttribute(starPositions, 3));
+        
+        const starsMaterial = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 1,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending
+        });
+
+        const starField = new THREE.Points(starsGeometry, starsMaterial);
+        scene.add(starField);
+
+        // Create nebula
+        createNebula();
+    }
+
+    function createNebula() {
+        const geometry = new THREE.BufferGeometry();
+        const material = new THREE.PointsMaterial({
+            size: 3,
+            transparent: true,
+            opacity: 0.5,
+            vertexColors: true,
+            blending: THREE.AdditiveBlending
+        });
+
+        const positions = [];
+        const colors = [];
+        const color = new THREE.Color();
+
+        for (let i = 0; i < 5000; i++) {
+            positions.push(
+                Math.random() * 1000 - 500,
+                Math.random() * 1000 - 500,
+                Math.random() * 1000 - 500
+            );
+
+            color.setHSL(Math.random(), 1, 0.5);
+            colors.push(color.r, color.g, color.b);
+        }
+
+        geometry.setAttribute('position', 
+            new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('color', 
+            new THREE.Float32BufferAttribute(colors, 3));
+
+        const nebula = new THREE.Points(geometry, material);
+        scene.add(nebula);
+    }
+
+    function createWeapons() {
+        // Create projectile pool (player)
+        for (let i = 0; i < 50; i++) {
+            const geometry = new THREE.SphereGeometry(0.2, 8, 8);
+            const material = new THREE.MeshPhongMaterial({
+                color: 0x00ff00,
+                emissive: 0x00ff00,
+                emissiveIntensity: 0.5
+            });
+            const projectile = new THREE.Mesh(geometry, material);
+            projectile.visible = false;
+            scene.add(projectile);
+            projectiles.push({
+                mesh: projectile,
+                velocity: new THREE.Vector3(),
+                active: false
+            });
+        }
+
+        // Create projectile pool (enemy)
+        for (let i = 0; i < 30; i++) {
+            const geometry = new THREE.SphereGeometry(0.15, 8, 8);
+            const material = new THREE.MeshPhongMaterial({
+                color: 0xff0000,
+                emissive: 0xff0000,
+                emissiveIntensity: 0.7
+            });
+            const projectile = new THREE.Mesh(geometry, material);
+            projectile.visible = false;
+            scene.add(projectile);
+            enemyProjectiles.push({
+                mesh: projectile,
+                velocity: new THREE.Vector3(),
+                active: false
+            });
+        }
+    }
+
+    function spawnEnemy() {
+        const enemy = new YUKA.Vehicle();
+        enemy.position.set(
+            Math.random() * 200 - 100,
+            Math.random() * 200 - 100,
+            Math.random() * 200 - 100
+        );
+        enemy.maxSpeed = 10 + Math.random() * 5;
+        enemy.maxForce = 1;
+
+        // Add AI behaviors
+        const seekBehavior = new YUKA.SeekBehavior(camera.position);
+        seekBehavior.weight = 1;
+        enemy.steering.add(seekBehavior);
+
+        const fleeBehavior = new YUKA.FleeBehavior(camera.position);
+        fleeBehavior.weight = 0.5;
+        enemy.steering.add(fleeBehavior);
+
+        // Create visual representation
+        const geometry = new THREE.TetrahedronGeometry(1);
+        const material = new THREE.MeshPhongMaterial({
+            color: 0xff0000,
+            emissive: 0xff0000,
+            emissiveIntensity: 0.5
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+
+        enemy.setRenderComponent(mesh, sync);
+        scene.add(mesh);
+        entityManager.add(enemy);
+        enemies.push(enemy);
+
+        return enemy;
+    }
+
+    function spawnWave() {
+        const enemyCount = 5 + currentWave * 2;
+        for (let i = 0; i < enemyCount; i++) {
+            spawnEnemy();
+        }
+        document.getElementById('waveNumber').textContent = currentWave;
+
+        // اضافه کردن چند بسته مهمات با نور درخشان
+        for (let i = 0; i < 3; i++) {
+            const ammoGeometry = new THREE.BoxGeometry(2, 2, 2);
+            const ammoMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x00ff00,
+                emissive: 0x00ff00,
+                emissiveIntensity: 0.5
+            });
+            const ammoBox = new THREE.Mesh(ammoGeometry, ammoMaterial);
+            
+            ammoBox.position.set(
+                Math.random() * 100 - 50,
+                Math.random() * 100 - 50,
+                Math.random() * 100 - 50
+            );
+
+            // اضافه کردن نور به جعبه مهمات
+            const ammoLight = new THREE.PointLight(0x00ff00, 1, 10);
+            ammoBox.add(ammoLight);
+            
+            scene.add(ammoBox);
+            powerUps.push({
+                mesh: ammoBox,
+                type: 'ammo',
+                amount: 30
+            });
+        }
+
+        // اضافه کردن بسته‌های جون
+        for (let i = 0; i < 2; i++) {
+            const healthGeometry = new THREE.BoxGeometry(2, 2, 2);
+            const healthMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xff0000,
+                emissive: 0xff0000,
+                emissiveIntensity: 0.5
+            });
+            const healthBox = new THREE.Mesh(healthGeometry, healthMaterial);
+            
+            healthBox.position.set(
+                Math.random() * 100 - 50,
+                Math.random() * 100 - 50,
+                Math.random() * 100 - 50
+            );
+
+            // اضافه کردن نور به جعبه جون
+            const healthLight = new THREE.PointLight(0xff0000, 1, 10);
+            healthBox.add(healthLight);
+            
+            scene.add(healthBox);
+            powerUps.push({
+                mesh: healthBox,
+                type: 'health',
+                amount: 50
+            });
+        }
+    }
+
+    function checkWaveComplete() {
+        if (enemies.length === 0) {
+            currentWave++;
+            spawnWave();
+            playWaveSound();
+        }
+    }
+
+    function sync(entity, renderComponent) {
+        renderComponent.position.copy(entity.position);
+        renderComponent.quaternion.copy(entity.rotation);
+    }
+
+    function setupAudio() {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    function playShootSound() {
+        if (!soundEnabled) return;
+
+        const oscillator = audioContext.createOscillator();
+        oscillator.type = 'sawtooth';
+        oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+
+        const gainNode = audioContext.createGain();
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        oscillator.start();
+        oscillator.stop(audioContext.currentTime + 0.2);
+    }
+
+    function playWaveSound() {
+        if (!soundEnabled) return;
+
+        const oscillator = audioContext.createOscillator();
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(440, audioContext.currentTime + 1);
+
+        const gainNode = audioContext.createGain();
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1);
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        oscillator.start();
+        oscillator.stop(audioContext.currentTime + 1);
+    }
+
+    function shoot() {
+        if (!canShoot || isReloading || clipAmmo <= 0) {
+            if (clipAmmo <= 0) {
+                reload();
+            }
+            return;
+        }
+
+        const projectile = projectiles.find(p => !p.active);
+        if (!projectile) return;
+
+        clipAmmo--;
+        updateHUD();
+
+        projectile.active = true;
+        projectile.mesh.visible = true;
+        projectile.mesh.position.copy(camera.position);
+
+        const direction = new THREE.Vector3();
+        camera.getWorldDirection(direction);
+        projectile.velocity.copy(direction).multiplyScalar(50);
+
+        playShootSound();
+
+        canShoot = false;
+        setTimeout(() => { canShoot = true; }, 250);
+    }
+
+    function reload() {
+        if (isReloading || totalAmmo <= 0) return;
+        
+        isReloading = true;
+        setTimeout(() => {
+            const needAmmo = CLIP_SIZE - clipAmmo;
+            const reloadAmount = Math.min(needAmmo, totalAmmo);
+            
+            clipAmmo += reloadAmount;
+            totalAmmo -= reloadAmount;
+            
+            isReloading = false;
+            updateHUD();
+        }, 2000);
+    }
+
+    function gameOver() {
+        controls.unlock();
+        document.getElementById('game-over').style.display = 'block';
+        // غیرفعال کردن کنترل‌ها
+        moveForward = false;
+        moveBackward = false;
+        moveLeft = false;
+        moveRight = false;
+        moveUp = false;
+        moveDown = false;
+        canShoot = false;
+    }
+
+    function addAmmo(amount) {
+        totalAmmo += amount;
+        updateHUD();
+    }
+
+    function updateProjectiles(delta) {
+        projectiles.forEach(projectile => {
+            if (!projectile.active) return;
+
+            projectile.mesh.position.add(
+                projectile.velocity.clone().multiplyScalar(delta)
+            );
+
+            // Check collisions with enemies
+            enemies.forEach((enemy, index) => {
+                if (projectile.mesh.position.distanceTo(enemy.position) < 2) {
+                    // Hit!
+                    projectile.active = false;
+                    projectile.mesh.visible = false;
+                    
+                    scene.remove(enemy.renderComponent);
+                    entityManager.remove(enemy);
+                    enemies.splice(index, 1);
+                    
+                    createExplosion(enemy.position);
+                    score += 100;
+                    document.getElementById('scoreValue').textContent = score;
+                }
+            });
+
+            // Remove if too far
+            if (projectile.mesh.position.length() > 1000) {
+                projectile.active = false;
+                projectile.mesh.visible = false;
+            }
+        });
+    }
+
+    function createExplosion(position) {
+        const particleCount = 20;
+        const geometry = new THREE.BufferGeometry();
+        const positions = [];
+
+        for (let i = 0; i < particleCount; i++) {
+            positions.push(
+                position.x + Math.random() * 2 - 1,
+                position.y + Math.random() * 2 - 1,
+                position.z + Math.random() * 2 - 1
+            );
+        }
+
+        geometry.setAttribute('position', 
+            new THREE.Float32BufferAttribute(positions, 3));
+
+        const material = new THREE.PointsMaterial({
+            color: 0xff0000,
+            size: 0.5,
+            transparent: true,
+            opacity: 1,
+            blending: THREE.AdditiveBlending
+        });
+
+        const explosion = new THREE.Points(geometry, material);
+        scene.add(explosion);
+
+        particles.push({
+            mesh: explosion,
+            life: 1.0
+        });
+    }
+
+    function updateParticles(delta) {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            particles[i].life -= delta;
+            particles[i].mesh.material.opacity = particles[i].life;
+
+            if (particles[i].life <= 0) {
+                scene.remove(particles[i].mesh);
+                particles.splice(i, 1);
+            }
+        }
+    }
+
+    function enemyShoot(enemy) {
+        const projectile = enemyProjectiles.find(p => !p.active);
+        if (!projectile) return;
+
+        projectile.active = true;
+        projectile.mesh.visible = true;
+        projectile.mesh.position.copy(enemy.position);
+
+        // جهت به سمت دوربین
+        const dir = new THREE.Vector3();
+        dir.subVectors(camera.position, enemy.position).normalize();
+        projectile.velocity.copy(dir).multiplyScalar(30);
+    }
+
+    let lastEnemyFire = 0;
+
+    function updateEnemyShooting(delta) {
+        lastEnemyFire += delta * 1000;
+        if (lastEnemyFire > ENEMY_FIRE_RATE) {
+            enemies.forEach(enemy => {
+                // فقط اگر دشمن نزدیک باشد شلیک کند
+                if (enemy.position.distanceTo(camera.position) < 80) {
+                    enemyShoot(enemy);
+                }
+            });
+            lastEnemyFire = 0;
+        }
+    }
+
+    function updateEnemyProjectiles(delta) {
+        enemyProjectiles.forEach(projectile => {
+            if (!projectile.active) return;
+
+            projectile.mesh.position.add(
+                projectile.velocity.clone().multiplyScalar(delta)
+            );
+
+            // برخورد با بازیکن
+            if (projectile.mesh.position.distanceTo(camera.position) < 1.5) {
+                projectile.active = false;
+                projectile.mesh.visible = false;
+                // کم کردن انرژی
+                energy -= 10;
+                if (energy < 0) energy = 0;
+            }
+
+            // حذف اگر خیلی دور شد
+            if (projectile.mesh.position.length() > 1000) {
+                projectile.active = false;
+                projectile.mesh.visible = false;
+            }
+        });
+    }
+
+    function setupMinimap() {
+        minimapCanvas = document.getElementById('minimap-canvas');
+        minimapCanvas.width = 150;
+        minimapCanvas.height = 150;
+        minimapCtx = minimapCanvas.getContext('2d');
+    }
+
+    function updateMinimap() {
+        // پاک کردن مینی‌مپ
+        minimapCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        minimapCtx.fillRect(0, 0, minimapCanvas.width, minimapCanvas.height);
+
+        const centerX = minimapCanvas.width / 2;
+        const centerY = minimapCanvas.height / 2;
+        const scale = 0.3;
+
+        // رسم بازیکن
+        minimapCtx.fillStyle = '#00ff00';
+        minimapCtx.beginPath();
+        minimapCtx.arc(centerX, centerY, 3, 0, Math.PI * 2);
+        minimapCtx.fill();
+
+        // رسم دشمنان
+        minimapCtx.fillStyle = '#ff0000';
+        enemies.forEach(enemy => {
+            const relX = (enemy.position.x - camera.position.x) * scale + centerX;
+            const relY = (enemy.position.z - camera.position.z) * scale + centerY;
+            minimapCtx.beginPath();
+            minimapCtx.arc(relX, relY, 2, 0, Math.PI * 2);
+            minimapCtx.fill();
+        });
+
+        // رسم پاورآپ‌ها
+        powerUps.forEach(powerUp => {
+            const relX = (powerUp.mesh.position.x - camera.position.x) * scale + centerX;
+            const relY = (powerUp.mesh.position.z - camera.position.z) * scale + centerY;
+            minimapCtx.fillStyle = powerUp.type === 'ammo' ? '#00ff00' : '#ffff00';
+            minimapCtx.beginPath();
+            minimapCtx.fillRect(relX - 2, relY - 2, 4, 4);
+            minimapCtx.fill();
+        });
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        if (controls.isLocked) {
+            const delta = Math.min(0.1, clock.getDelta());
+
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+            velocity.y -= velocity.y * 10.0 * delta;
+
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.y = Number(moveUp) - Number(moveDown);
+            direction.normalize();
+
+            if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
+            if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
+            if (moveUp || moveDown) velocity.y += direction.y * 400.0 * delta;
+
+            controls.moveRight(-velocity.x * delta);
+            controls.moveForward(-velocity.z * delta);
+            camera.position.y += velocity.y * delta;
+
+            // Update game systems
+            const deltaTime = time.update().getDelta();
+            entityManager.update(deltaTime);
+            updateProjectiles(delta);
+            updateEnemyShooting(delta);
+            updateEnemyProjectiles(delta);
+            updateParticles(delta);
+            checkWaveComplete();
+            updateHUD();
+            updateMinimap();
+
+            // بررسی برخورد با پاور‌آپ‌ها
+            powerUps.forEach((powerUp, index) => {
+                if (powerUp.mesh.position.distanceTo(camera.position) < 3) {
+                    if (powerUp.type === 'ammo') {
+                        totalAmmo += powerUp.amount;
+                        updateHUD();
+                    } else if (powerUp.type === 'health') {
+                        energy = Math.min(100, energy + powerUp.amount);
+                        updateHUD();
+                    }
+                    scene.remove(powerUp.mesh);
+                    powerUps.splice(index, 1);
+                }
+            });
+        }
+        renderer.render(scene, camera);
+    }
+
+    function updateHUD() {
+        const speed = velocity.length();
+        document.getElementById('speed').textContent = Math.round(speed * 10) / 10;
+        document.getElementById('energy').textContent = energy;
+        document.getElementById('health-fill').style.width = `${energy}%`;
+        
+        // بروزرسانی نمایش مهمات
+        document.getElementById('clipAmmo').textContent = clipAmmo;
+        document.getElementById('totalAmmo').textContent = totalAmmo;
+
+        // چک کردن گیم اور
+        if (energy <= 0) {
+            energy = 0;
+            gameOver();
+        }
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function onKeyDown(event) {
+        switch (event.code) {
+            case 'ArrowUp':
+            case 'KeyW':
+                moveForward = true;    // فقط break داشت
+                break;
+            case 'ArrowDown':
+            case 'KeyS':
+                moveBackward = true;   // فقط break داشت
+                break;
+            case 'ArrowLeft':
+            case 'KeyA':
+                moveLeft = true;
+                break;
+            case 'ArrowRight':
+            case 'KeyD':
+                moveRight = true;
+                break;
+            case 'Space':
+                moveUp = true;
+                break;
+            case 'ShiftLeft':
+                moveDown = true;
+                break;
+            case 'KeyE':
+                shoot();
+                break;
+            case 'KeyR':
+                reload();
+                break;
+        }
+    }
+
+    function onKeyUp(event) {
+        switch (event.code) {
+            case 'ArrowUp':
+            case 'KeyW':
+                moveForward = false;
+                break;
+            case 'ArrowDown':
+            case 'KeyS':
+                moveBackward = false;
+                break;
+            case 'ArrowLeft':
+            case 'KeyA':
+                moveLeft = false;
+                break;
+            case 'ArrowRight':
+            case 'KeyD':
+                moveRight = false;
+                break;
+            case 'Space':
+                moveUp = false;
+                break;
+            case 'ShiftLeft':
+                moveDown = false;
+                break;
+        }
+    }
+
+    function onMouseDown(event) {
+        if (event.button === 0) {
+            shoot();
+        }
+    }
+</script>
+</body>
+</html>
